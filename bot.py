@@ -1,6 +1,17 @@
-import logging
+import logging, json, re
 
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+
+from supabase import create_client, Client
+
+url: str = "https://bfidboospedlmbqmriid.supabase.co"
+key: str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJmaWRib29zcGVkbG1icW1yaWlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE2NzI1NzU3OTQsImV4cCI6MTk4ODE1MTc5NH0.qan0LIo4JSP-rsdBFqHahxdFI7bdxX06tCwd6OJhSLk"
+supabase: Client = create_client(url, key)
+# data = supabase.table("countries").insert({"name":"Germany"}).execute()
+# print(data)
+
+data = supabase.table("countries").select("*").execute()
+print(data.data[0].get("name"))
 
 # Enable logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -26,7 +37,20 @@ def piracy(update, context):
 
 def echo(update, context):
     """Echo the user message."""
-    update.message.reply_text(update.message.text)
+    try:
+        text = update.message.text
+        print(text)
+        name = re.search(r"\w+", text).group()
+        descTemp = re.search(r"\bd=\w+", text)
+        desc="Empty"
+        if descTemp:
+            desc = descTemp.group()[2:]
+
+        price = int(re.search(r"\bp=\w+", text).group()[2:])
+        update.message.reply_text('Haiii ' + name + "\ndesc: " + desc + "\nprice: " + str(price))
+    except error:
+        print("not a problem")
+    
 
 
 def error(update, context):
