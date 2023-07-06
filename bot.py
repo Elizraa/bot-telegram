@@ -1,92 +1,239 @@
-import logging, json, re
-
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from flask import Flask, request
+import telepot
+import urllib3
+import re, random
+import openai
 
 from supabase import create_client, Client
 
-url: str = "https://bfidboospedlmbqmriid.supabase.co"
-key: str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJmaWRib29zcGVkbG1icW1yaWlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE2NzI1NzU3OTQsImV4cCI6MTk4ODE1MTc5NH0.qan0LIo4JSP-rsdBFqHahxdFI7bdxX06tCwd6OJhSLk"
+url: str = "YOUR_SUPABASE_URL"
+key: str = "YOUR_SUPABASE_KEY"
 supabase: Client = create_client(url, key)
-# data = supabase.table("countries").insert({"name":"Germany"}).execute()
-# print(data)
 
-data = supabase.table("countries").select("*").execute()
-print(data.data[0].get("name"))
+proxy_url = "http://proxy.server:3128"
+telepot.api._pools = {
+    'default': urllib3.ProxyManager(proxy_url=proxy_url, num_pools=3, maxsize=10, retries=False, timeout=30),
+}
+telepot.api._onetime_pool_spec = (urllib3.ProxyManager, dict(proxy_url=proxy_url, num_pools=1, maxsize=1, retries=False, timeout=30))
 
-# Enable logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    level=logging.INFO)
+secret = "YOUR_SECRET_TOKEN"
+bot = telepot.Bot('YOUR_TELEGRAM_BOT_TOKEN')
+bot.setWebhook("YOUR_WEBHOOK".format(secret), max_connections=1)
 
-logger = logging.getLogger(__name__)
+openai.api_key = "YOUR_OPENAI_API_KEY"
+
+tg_commands = {}
+
+ # return cmd, params
+def parse_cmd(cmd_string):
+	text_split = cmd_string.split()
+	return text_split[0], text_split[1:]
+
+def add_command(cmd, func):
+	global tg_commands
+	tg_commands[cmd] = func
+
+def remove_command(cmd):
+	global tg_commands
+	del tg_commands[cmd]
+
+started = False
+
+def start_bot(chat_id):
+    add_command("/echo", cmd_echo)
+    add_command("/list", list)
+    add_command("/jumlah", jumlah)
+    add_command("/love", love)
+    add_command("/delete", delete)
+    add_command("/ai", chatbot)
+    add_command("/hanna", hanna)
+    started = True
+    bot.sendMessage(chat_id, "bot baru nyala lagi, ulang dong commandnya")
 
 
-# Define a few command handlers. These usually take the two arguments update and
-# context. Error handlers also receive the raised TelegramError object in error.
-def start(update, context):
-    """Send a message when the command /start is issued."""
-    update.message.reply_text('Hey this is your bot!')
+app = Flask(__name__)
 
 
-def help(update, context):
-    """Send a message when the command /help is issued."""
-    update.message.reply_text('Currently I am in Alpha stage, help me also!')
+@app.route('/')
+def hello_world():
+    add_command("/echo", cmd_echo)
+    add_command("/list", list)
+    add_command("/jumlah", jumlah)
+    add_command("/love", love)
+    add_command("/delete", delete)
+    add_command("/ai", chatbot)
+    add_command("/hanna", hanna)
+    return 'Hello from Flask!'
 
-def piracy(update, context):
-    update.message.reply_text('Ahhan, FBI wants to know your location!')
+@app.route('/{}'.format(secret), methods=["POST"])
+def telegram_webhook():
+    global tg_commands
+    update = request.get_json()
+    if "message" in update:
+        chat_id = update["message"]["chat"]["id"]
+        if "text" in update["message"]:
+            text = update["message"]["text"]
+            if text[0] == '/':
+                cmd, params = parse_cmd(text)
+                try:
+                    tg_commands[cmd](chat_id, params)
+                except KeyError:
+                    if not started:
+                        start_bot(chat_id)
+                    else:
+                        bot.sendMessage(chat_id, "Unknown command: {cmd}".format(cmd=cmd))
 
+            else:
+                try:
+                    name = re.search(r"\w+", text).group()
+                    descTemp = re.search(r"\bd=\w+", text)
+                    desc="Empty"
 
-def echo(update, context):
-    """Echo the user message."""
+                    if descTemp:
+                        desc = descTemp.group()[2:]
+
+                    priceTemp = re.search(r"\bp=\w+", text)
+                    if priceTemp:
+                        price = int(priceTemp.group()[2:])
+                    else:
+                        return "NOT OK"
+                    reply = insert_data(name, desc, price)
+                    bot.sendMessage(chat_id, reply)
+                except:
+                    bot.sendMessage(chat_id, "Gagal Banget :(")
+                    return "NOT OK"
+
+            # bot.sendMessage(chat_id, "From the web: you said '{}'".format(text))
+        else:
+            bot.sendMessage(chat_id, "From the web: sorry, I didn't understand that kind of message")
+    return "OK"
+
+def cmd_echo(chat_id, params):
+	bot.sendMessage(chat_id, "[ECHO] {text}".format(text=" ".join(params)))
+
+def insert_data(name, desc, price):
+    name = name.lower()
+
+    final_price = get_current_final_price()
+    # OPTIONAL
+    if name == "azriel":
+        final_price = final_price - price
+    elif name == "tiva":
+        final_price = final_price + price
+    else:
+        return "Kamu bukan Azriel atau Tiva, Siapa Kamu??"
+
     try:
-        text = update.message.text
-        print(text)
-        name = re.search(r"\w+", text).group()
-        descTemp = re.search(r"\bd=\w+", text)
-        desc="Empty"
-        if descTemp:
-            desc = descTemp.group()[2:]
-
-        price = int(re.search(r"\bp=\w+", text).group()[2:])
-        update.message.reply_text('Haiii ' + name + "\ndesc: " + desc + "\nprice: " + str(price))
-    except error:
-        print("not a problem")
-    
-
-
-def error(update, context):
-    """Log Errors caused by Updates."""
-    logger.warning('Update "%s" caused error "%s"', update, context.error)
-
-
-def main():
-    """Start the bot."""
-    # Create the Updater and pass it your bot's token.
-    # Make sure to set use_context=True to use the new context based callbacks
-    # Post version 12 this will no longer be necessary
-    updater = Updater("5837801385:AAFcRpVgW1GlHSrZ4TZOhraFcDOjpDkFMdQ", use_context=True)
-
-    # Get the dispatcher to register handlers
-    dp = updater.dispatcher
-
-    # on different commands - answer in Telegram
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("help", help))
-    dp.add_handler(CommandHandler("piracy", piracy))
-
-    # on noncommand i.e message - echo the message on Telegram
-    dp.add_handler(MessageHandler(Filters.text, echo))
-
-    # log all errors
-    dp.add_error_handler(error)
-
-    # Start the Bot
-    updater.start_polling()
-
-    # Run the bot until you press Ctrl-C or the process receives SIGINT,
-    # SIGTERM or SIGABRT. This should be used most of the time, since
-    # start_polling() is non-blocking and will stop the bot gracefully.
-    updater.idle()
+        data = supabase.table("buku-pengeluaran").insert(
+            {
+                "name": name,
+                "desc": desc,
+                "price": price,
+                "final_price": final_price
+            }
+            ).execute()
+        if(data.data[0].get('name') == name):
+            if final_price == 0:
+                return "Asikk Lunas semua :D\nJumlah akhir: 0"
+            res="Rp {:,}".format(final_price)
+            return "Berhasil!! jumlah akhir: " + res
+        else:
+            return 'Gagal :('
+    except:
+        return 'Gagal :('
 
 
-if __name__ == '__main__':
-    main()
+def jumlah(chat_id, params=""):
+    final_price = get_current_final_price()
+    res="Rp {:,}".format(final_price)
+    bot.sendMessage(chat_id, 'Jumlah akhir: ' + res)
+
+def list(chat_id, params):
+    try:
+        limit = int(params[0])
+        if limit <= 0:
+            limit  =10
+    except:
+        limit = 10
+    try:
+        data = get_table_list(limit)
+        msg = "List: \n"
+        for i in reversed(data):
+            msg += "{}, {}, {}, {}, {}".format(i.get('name'), i.get('desc'), i.get('price'), i.get('created_at')[:10], i.get('final_price'))
+            msg += "\n"
+        bot.sendMessage(chat_id, msg)
+    except:
+        bot.sendMessage(chat_id, 'error')
+
+def love(chat_id, params=""):
+    bot.sendMessage(chat_id, "I love you!!")
+    i = random.randint(1, 2)
+    if i == 0:
+        bot.sendDocument(chat_id, "https://media.giphy.com/media/BXrwTdoho6hkQ/giphy.gif")
+    elif i == 1:
+        bot.sendDocument(chat_id, "https://media.giphy.com/media/GMUTanoEMDhUEcsnPs/giphy.gif")
+    else:
+        bot.sendDocument(chat_id, "https://media.giphy.com/media/Ut8FZWMUJW0bv9D4yp/giphy.gif")
+
+
+def get_table_list(limit=10):
+    data = supabase.table("buku-pengeluaran").select('*').order('id', desc=True).limit(limit).execute()
+    return data.data
+
+def get_current_final_price():
+    data = supabase.table("buku-pengeluaran").select('*').order('id', desc=True).limit(1).execute()
+    if len(data.data) == 0:
+        return 0
+    return int(data.data[0].get('final_price'))
+
+def delete(chat_id, params):
+    try:
+        limit = int(params[0])
+        if limit > 5:
+            limit = 5
+    except:
+        limit = 1
+
+    data = get_table_list(limit)
+    for i in data:
+        supabase.table("buku-pengeluaran").delete().eq('id', i.get('id')).execute()
+
+    msg = str(limit) + " data berhasil dihapus!!\n"
+    final_price = get_current_final_price()
+    res="Rp {:,}".format(final_price)
+    msg += "Jumlah akhir: " + res
+    bot.sendMessage(chat_id, msg)
+
+
+messages = [
+    {"role": "system", "content": "You are a helpful and kind AI Assistant."},
+]
+
+messages_lalita = [
+    {"role": "system", "content": "Act like a very young cute girl named Hanna, and i am your parents."},
+]
+
+
+def chatbot(chat_id, params):
+    input = " ".join(params)
+    if input:
+        messages.append({"role": "user", "content": input})
+        chat = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo", messages=messages
+        )
+        reply = chat.choices[0].message.content
+        messages.append({"role": "assistant", "content": reply})
+        bot.sendMessage(chat_id, reply)
+        # return reply
+
+def hanna(chat_id, params):
+    input = " ".join(params)
+    if input:
+        messages_lalita.append({"role": "user", "content": input})
+        chat = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo", messages=messages_lalita
+        )
+        reply = chat.choices[0].message.content
+        messages_lalita.append({"role": "assistant", "content": reply})
+        bot.sendMessage(chat_id, reply)
+        # return reply
